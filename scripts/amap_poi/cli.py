@@ -18,6 +18,7 @@ from .client import AmapClient, AmapError
 from .collect import Collector, estimate_requests
 from .export import export
 from .normalize import parse_region
+from .regions import default_cache_path, get_index, resolve_all
 from .report import EXIT_FATAL, EXIT_OK, EXIT_PARTIAL, build_report, compute_exit_code, write_report
 
 KEY_PLACEHOLDER_HINTS = ("在此填入", "your_key", "YOUR_KEY", "<", "请填入")
@@ -151,12 +152,16 @@ def build_parser() -> argparse.ArgumentParser:
             "地区参数：城市名 / 省名 / 6 位 adcode。区县名会被拒绝（高德会串到同名区县）。\n"
         ),
     )
-    parser.add_argument("-k", "--keyword", action="append", required=True,
+    parser.add_argument("-k", "--keyword", action="append", required=False,
                         dest="keywords", metavar="关键词",
-                        help="要搜的关键词，可重复多次")
-    parser.add_argument("-r", "--region", action="append", required=True,
+                        help="要搜的关键词，可重复多次（用 --list-regions 时可省略）")
+    parser.add_argument("-r", "--region", action="append", required=False,
                         dest="regions", metavar="地区",
-                        help="城市名 / 省名 / 6 位 adcode，可重复多次")
+                        help="城市名 / 省名 / 区县名 / 6 位 adcode，可重复多次")
+    parser.add_argument("--list-regions", default=None, metavar="城市名",
+                        help="列出该城市（或省）下辖的区县与 adcode，然后退出；不采集")
+    parser.add_argument("--refresh-regions", action="store_true",
+                        help="强制重新拉取行政区划索引（默认缓存 30 天）")
     parser.add_argument("-n", "--max-records", type=int, default=0,
                         help="本次总条数上限（默认 0 = 不限；单查询本身约 200~225 条到顶）")
     parser.add_argument("-f", "--format", default="csv", choices=("csv", "json", "xlsx"),
@@ -191,6 +196,85 @@ def validate_regions(regions):
     if errors:
         raise ValueError("\n".join(errors))
     return parsed
+
+
+def _region_cache(args) -> str:
+    """行政区划缓存路径。放在技能目录，避免跟调用方 cwd 走。"""
+    return default_cache_path(SKILL_ROOT)
+
+
+def _load_region_index(args, key, quiet=False):
+    """取行政区划索引：缓存新鲜时零请求、零 key。
+
+    返回 ``None`` 表示「离线可用但拿不到 key」，调用方决定是降级还是报错。
+    """
+    path = _region_cache(args)
+    try:
+        return get_index(
+            path,
+            key=key or "",
+            refresh=getattr(args, "refresh_regions", False),
+        )
+    except AmapError:
+        if quiet:
+            return None
+        raise
+
+
+def list_regions(index, query):
+    """``--list-regions`` 的实现：打印某城市/省下辖的区县与 adcode。
+
+    返回退出码：找到下级 → ``EXIT_OK``，找不到 → ``EXIT_FATAL``。
+    """
+    matches = index.find(query)
+    if not matches:
+        print("[x] 没找到 %r。可以试城市全名（用「市」结尾）或省名。" % query, file=sys.stderr)
+        return EXIT_FATAL
+
+    if len(matches) > 1:
+        print("[!] %r 有 %d 个匹配，请用更完整的名称（如「海口市」）：" % (query, len(matches)))
+        for node in matches:
+            print("  %s  %s（%s）" % (node.adcode, index.path(node), node.level_label))
+        return EXIT_FATAL
+
+    parent = matches[0]
+    children = index.children(parent)
+    print("%s（%s，adcode=%s）" % (parent.name, parent.level_label, parent.adcode))
+    if not children:
+        print("  没有下级行政单位 —— 该区划只能整体检索，不能再往下拆。")
+        print("  直接用 `-r %s` 即可；要更全只能加关键词变体（同义的多种说法）。" % parent.adcode)
+        return EXIT_OK
+
+    districts = [node for node in children if node.level == "district"]
+    cities = [node for node in children if node.level == "city"]
+    others = [node for node in children if node.level not in ("district", "city")]
+
+    if districts:
+        print()
+        print("下辖区县 %d 个（把 adcode 传给 -r 就能按区县检索）：" % len(districts))
+        for node in districts:
+            print("  %s  %s" % (node.adcode, node.name))
+    if cities:
+        print()
+        print("下辖地级单位 %d 个（按城市跑；每个城市内部还可以再按区县拆）：" % len(cities))
+        for node in cities:
+            print("  %s  %s" % (node.adcode, node.name))
+    if others:
+        print()
+        print("下级行政单位 %d 个：" % len(others))
+        for node in others:
+            print("  %s  %s（%s）" % (node.adcode, node.name, node.level_label))
+    if not districts and others:
+        print()
+        print("注意：这些不是区县级单位（该市没有区县层，如东莞、中山、济源）。"
+              "它们与上级共用同一批 POI，按每个下级各跑一遍不会拿到更多数据；"
+              "要更全只能加关键词变体。")
+    print()
+    if districts:
+        print("提示：想一次把所有区县都跑一遍，把上面的 adcode 逐个加到 -r 上即可。")
+    elif cities:
+        print("提示：先用 `--list-regions <某个城市>` 看它下辖的区县，再逐个 -r 传入。")
+    return EXIT_OK
 
 
 # ---------------------------------------------------------------- 输出
@@ -251,8 +335,26 @@ def main(argv=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    keywords = [item.strip() for item in args.keywords if item and item.strip()]
-    regions = [item.strip() for item in args.regions if item and item.strip()]
+    keywords = [item.strip() for item in (args.keywords or []) if item and item.strip()]
+    regions = [item.strip() for item in (args.regions or []) if item and item.strip()]
+
+    # --list-regions 是独立查询：不需要关键词，也不需要真的采集
+    if args.list_regions:
+        try:
+            key = resolve_key(args.config, allow_prompt=False)
+        except AmapError:
+            key = ""  # 有缓存就不需要 key
+        try:
+            index = _load_region_index(args, key)
+        except AmapError as exc:
+            print("[x] %s" % exc, file=sys.stderr)
+            return EXIT_FATAL
+        if index is None:
+            print("[x] 没有可用的行政区划索引，也没有可用的 key。"
+                  "请设置 AMAP_KEY，或把 key 写进技能目录的 config.json。", file=sys.stderr)
+            return EXIT_FATAL
+        return list_regions(index, args.list_regions)
+
     if not keywords:
         print("[x] 关键词为空", file=sys.stderr)
         return EXIT_FATAL
@@ -267,12 +369,52 @@ def main(argv=None) -> int:
         print(str(exc), file=sys.stderr)
         return EXIT_FATAL
 
-    for index, (kind, _value) in enumerate(parsed_regions):
+    # 区县名 → adcode。这一步可能需要一次在线拉取（首次），之后走本地缓存。
+    # 关键：真跑时**必须**解析成功，否则就会把「龙华区」原样传给 API，
+    # 拿到深圳的数据而毫无提示——这正是本工具最想避免的失败模式。
+    if any(kind == "district" for kind, _ in parsed_regions):
+        try:
+            key = resolve_key(args.config, allow_prompt=False)
+        except AmapError:
+            key = ""
+        index = None
+        try:
+            index = _load_region_index(args, key, quiet=True)
+        except AmapError as exc:
+            if not args.dry_run:
+                print("[x] 解析区县名需要行政区划索引：%s" % exc, file=sys.stderr)
+                print("    也可以直接给 6 位 adcode，或用 --list-regions <城市名> 先查。",
+                      file=sys.stderr)
+                return EXIT_FATAL
+
+        if index is None:
+            if not args.dry_run:
+                print("[x] 解析区县名需要一次在线拉取行政区划（约 1 次请求），"
+                      "但当前没有可用的 key。\n"
+                      "    请设置 AMAP_KEY，或直接把区县换成 6 位 adcode。", file=sys.stderr)
+                return EXIT_FATAL
+            print("[!] 还没有行政区划缓存、也没有 key：dry-run 只能按区县名显示计划。"
+                  "真跑之前会先花 1 次请求把区县名换成 6 位 adcode。")
+        else:
+            parsed_regions, notes, errors = resolve_all(index, parsed_regions)
+            if errors:
+                print("[x] 地区参数无法确定：", file=sys.stderr)
+                for item in errors:
+                    print(item, file=sys.stderr)
+                return EXIT_FATAL
+            for note in notes:
+                print("区县已解析：%s" % note)
+
+    for index_, (kind, _value) in enumerate(parsed_regions):
         if kind == "province":
             print("提示：%s 是省级查询，结果会跨市且同样受 200 条上限；"
-                  "要更全建议按城市跑。" % regions[index])
+                  "要更全建议按城市跑。" % regions[index_])
 
-    estimate = estimate_requests(len(keywords), len(regions), args.max_records, args.offset)
+    # 实际发起检索用的地区值：区县名已被换成 adcode，其余原样。
+    # 必须用这份而不是用户原始输入——把「龙华区」直接传给 API 会静默查到深圳。
+    run_regions = [value for _kind, value in parsed_regions]
+
+    estimate = estimate_requests(len(keywords), len(run_regions), args.max_records, args.offset)
     # 注意：不把 estimate 直接当硬刹车。estimate 是「预估」，实测显示单单元
     # 结束页数会因城市而变（海口 9 页、成都 8 页），把预估值当上限会把
     # 正常收官的那一次空页请求砍掉，误报「已达请求上限」。
@@ -310,7 +452,7 @@ def main(argv=None) -> int:
 
     print("\n开始采集…（每单元翻到返回 0 条为止）")
     try:
-        result = collector.run(keywords, regions)
+        result = collector.run(keywords, run_regions)
     except AmapError as exc:
         print("[x] 致命错误：%s" % exc, file=sys.stderr)
         return EXIT_FATAL
@@ -329,6 +471,7 @@ def main(argv=None) -> int:
             params={
                 "keywords": keywords,
                 "regions": regions,
+                "regions_resolved": run_regions,
                 "max_records": args.max_records,
                 "format": args.format,
             },
@@ -349,6 +492,7 @@ def main(argv=None) -> int:
             params={
                 "keywords": keywords,
                 "regions": regions,
+                "regions_resolved": run_regions,
                 "max_records": args.max_records,
                 "format": args.format,
                 "max_requests": max_requests,

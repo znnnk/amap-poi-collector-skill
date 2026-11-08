@@ -149,10 +149,13 @@ def merge_keyword(record: Dict[str, str], keyword: str) -> None:
 def parse_region(value: str) -> Tuple[str, str]:
     """校验并分类地区参数，返回 ``(kind, cleaned)``。
 
-    kind 取值：``"adcode"`` / ``"province"`` / ``"city"``。
+    kind 取值：``"adcode"`` / ``"province"`` / ``"city"`` / ``"district"``。
 
-    区县名（以 区/县/旗 结尾且不是 6 位数字）会被**拒绝**：实测 ``city=龙华区``
-    会被高德解析成深圳的龙华区，属于静默的数据错误，比直接报错更危险。
+    区县名会被归类成 ``"district"`` 并**原样返回**，由 :mod:`amap_poi.regions`
+    再解析成 6 位 adcode。为什么不在这里直接拒绝：``city=龙华区`` 会被高德解析成
+    深圳的龙华区（实测），但用户确实只想说「龙华区」，让他自己去查 adcode 是不必要
+    的负担——本地有一份全国区划索引，可以查出来；查到多个同名时再要求他用 adcode。
+    唯一的硬规则是**绝不猜**。
 
     >>> parse_region("460106")
     ('adcode', '460106')
@@ -160,13 +163,12 @@ def parse_region(value: str) -> Tuple[str, str]:
     ('province', '海南省')
     >>> parse_region("成都")
     ('city', '成都')
-    >>> parse_region("龙华区")  # doctest: +ELLIPSIS
-    Traceback (most recent call last):
-    ValueError: ...
+    >>> parse_region("龙华区")
+    ('district', '龙华区')
     """
     text = (value or "").strip()
     if not text:
-        raise ValueError("地区参数为空：请给城市名、省名或 6 位 adcode")
+        raise ValueError("地区参数为空：请给城市名、省名、区县名或 6 位 adcode")
 
     if text.isdigit() and len(text) == 6:
         return "adcode", text
@@ -175,10 +177,7 @@ def parse_region(value: str) -> Tuple[str, str]:
         return "province", text
 
     if text.endswith(_DISTRICT_SUFFIXES):
-        raise ValueError(
-            "不接受区县名称 %r：高德会把同名区县解析到错误城市（实测「龙华区」命中深圳）。"
-            "请改用 6 位 adcode，例如海口市龙华区是 460106。" % text
-        )
+        return "district", text
 
     return "city", text
 
