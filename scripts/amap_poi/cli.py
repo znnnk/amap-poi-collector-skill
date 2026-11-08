@@ -1,13 +1,14 @@
 # -*- coding: utf-8 -*-
 """命令行入口：参数解析、key 解析、预算确认、编排调用、报告与退出码。
 
-设计约束（见 README §5、§6）：
+设计约束（详见 README「参数与产物」与「数据为什么可能不完整」）：
   * 只有关键词和地区必填，其余都有默认值；
   * 请求数是乘法增长，因此执行前必须打印预估并要 ``--yes`` 确认；
   * 高德错误码决定「停 / 退避 / 跳过」，退出码决定 Skill 的话术。
 """
 
 import argparse
+import io
 import os
 import sys
 from datetime import datetime
@@ -27,6 +28,56 @@ SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 
 DEFAULT_CONFIG = "config.json"
 DEFAULT_OUTPUT_DIR = "output"
+
+
+# ---------------------------------------------------------------- 控制台编码
+
+
+def _harden_console(stream):
+    """让终端编码装不下的字符降级成 ``?``，而不是抛异常终止整次采集。
+
+    Windows 中文控制台的默认编码是 GBK，装不下 ``⚠`` (U+26A0)、``✗`` (U+2717)，
+    甚至装不下用户自己输入的 emoji 关键词。若不兜底，``print_result()`` 会在
+    **数据已经写盘之后**抛 ``UnicodeEncodeError``，进程以 1 退出——调用方拿不到
+    本该是 ``2``（不完整）或 ``3``（致命）的退出码，等于采集结果白跑。
+    """
+    if stream is None:
+        return None
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is not None:  # Python 3.7+
+        try:
+            reconfigure(errors="replace")
+            return stream
+        except (ValueError, OSError):
+            pass
+    buffer = getattr(stream, "buffer", None)  # Python 3.6
+    if buffer is None:
+        return stream
+    try:
+        return io.TextIOWrapper(
+            buffer,
+            encoding=getattr(stream, "encoding", None) or "utf-8",
+            errors="replace",
+            line_buffering=True,
+        )
+    except (ValueError, OSError):
+        return stream
+
+
+def harden_console():
+    """给 stdout / stderr 装上「编码失败就替换」的兜底。可重复调用。"""
+    global _CONSOLE_HARDENED
+    if _CONSOLE_HARDENED:
+        return
+    for name in ("stdout", "stderr"):
+        stream = getattr(sys, name, None)
+        hardened = _harden_console(stream)
+        if hardened is not None and hardened is not stream:
+            setattr(sys, name, hardened)
+    _CONSOLE_HARDENED = True
+
+
+_CONSOLE_HARDENED = False
 
 
 # ---------------------------------------------------------------- key 解析
@@ -177,13 +228,13 @@ def print_result(result, outputs):
         print()
         print("错误记录：")
         for item in result.errors:
-            print("  ✗ %s → %s" % (item.get("unit", ""), item.get("message", "")))
+            print("  [x] %s -> %s" % (item.get("unit", ""), item.get("message", "")))
     if result.stopped_early:
         print()
-        print("⚠ 提前结束：%s" % (result.stop_reason or "未知原因"))
+        print("[!] 提前结束：%s" % (result.stop_reason or "未知原因"))
     if result.hit_cap_units:
         print()
-        print("⚠ %d 个查询单元疑似触顶（单查询约 200~225 条即到顶），本次数据可能不完整。"
+        print("[!] %d 个查询单元疑似触顶（单查询约 200~225 条即到顶），本次数据可能不完整。"
               % len(result.hit_cap_units))
         print("  想拿更全：加关键词变体、或把城市拆成区县 adcode 再跑。")
     if outputs:
@@ -196,22 +247,23 @@ def print_result(result, outputs):
 
 
 def main(argv=None) -> int:
+    harden_console()
     parser = build_parser()
     args = parser.parse_args(argv)
 
     keywords = [item.strip() for item in args.keywords if item and item.strip()]
     regions = [item.strip() for item in args.regions if item and item.strip()]
     if not keywords:
-        print("✗ 关键词为空", file=sys.stderr)
+        print("[x] 关键词为空", file=sys.stderr)
         return EXIT_FATAL
     if not regions:
-        print("✗ 地区为空", file=sys.stderr)
+        print("[x] 地区为空", file=sys.stderr)
         return EXIT_FATAL
 
     try:
         parsed_regions = validate_regions(regions)
     except ValueError as exc:
-        print("✗ 地区参数不合法：", file=sys.stderr)
+        print("[x] 地区参数不合法：", file=sys.stderr)
         print(str(exc), file=sys.stderr)
         return EXIT_FATAL
 
@@ -235,12 +287,12 @@ def main(argv=None) -> int:
     try:
         key = resolve_key(args.config, allow_prompt=True)
     except AmapError as exc:
-        print("✗ %s" % exc, file=sys.stderr)
+        print("[x] %s" % exc, file=sys.stderr)
         return EXIT_FATAL
 
     if not args.yes:
         if not (sys.stdin and sys.stdin.isatty()):
-            print("✗ 非交互环境请加 --yes 确认执行（避免 Agent 误触发消耗配额）", file=sys.stderr)
+            print("[x] 非交互环境请加 --yes 确认执行（避免 Agent 误触发消耗配额）", file=sys.stderr)
             return EXIT_FATAL
         answer = input("确认执行？将消耗最多 %d 次请求 [y/N]：" % estimate).strip().lower()
         if answer not in ("y", "yes"):
@@ -260,10 +312,10 @@ def main(argv=None) -> int:
     try:
         result = collector.run(keywords, regions)
     except AmapError as exc:
-        print("✗ 致命错误：%s" % exc, file=sys.stderr)
+        print("[x] 致命错误：%s" % exc, file=sys.stderr)
         return EXIT_FATAL
     except KeyboardInterrupt:
-        print("\n✗ 已中断（未写出任何数据）", file=sys.stderr)
+        print("\n[x] 已中断（未写出任何数据）", file=sys.stderr)
         return EXIT_FATAL
 
     outputs = {}
@@ -308,7 +360,11 @@ def main(argv=None) -> int:
         write_report(report, args.report_json)
         outputs["report"] = args.report_json
 
-    print_result(result, outputs)
+    # 收尾打印只是「给人看」的，不能让编码问题推翻已经写好的产物和退出码。
+    try:
+        print_result(result, outputs)
+    except Exception:  # noqa: BLE001
+        sys.stderr.write("[warn] 结果摘要打印失败（不影响已写出的文件与退出码）\n")
     return exit_code
 
 

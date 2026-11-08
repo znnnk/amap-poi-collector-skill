@@ -97,6 +97,12 @@ class CollectResult(object):
 
     @property
     def failed_units(self) -> List[UnitResult]:
+        """真正出错的单元。
+
+        注意 ``status == "pending"``（还没轮到就因条数/请求上限停了）**不算失败**——
+        那是用户主动设了上限，不是采集出了问题；把它算进来会让每次带 ``-n`` 的运行
+        都报「有单元失败」，反而掩盖真正的错误。
+        """
         return [unit for unit in self.units if unit.status in ("failed", "partial")]
 
     @property

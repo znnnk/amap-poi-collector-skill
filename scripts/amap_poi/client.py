@@ -4,11 +4,11 @@
 这一层是唯一知道 HTTP 与高德字段语义的地方。上层只看到
 :class:`SearchPage` 与 :class:`AmapError`，不知道 URL 长什么样。
 
-关键事实（2026-11-07 实测，见 README §3）：
+关键事实（2026-11-07 实测，证据与全部实验见 ``references/api-notes.md``）：
   * 高德错误也返回 **HTTP 200**，真正的结果在 ``status`` / ``infocode``。
   * ``count`` 不可信（实测 count=551 但只能取到 225 条）。
   * 翻页天花板约 200~225 条且随城市与 ``offset`` 漂移，唯一可靠的终止信号是
-    「本页返回 0 条」（见 README §3.2）。
+    「本页返回 0 条」。
 """
 
 import json
@@ -110,6 +110,10 @@ def classify(infocode: Optional[str]) -> str:
     """把 infocode 归到 ``fatal`` / ``retry`` / ``skip``。未知码按 ``skip`` 处理。
 
     ``300xx`` 是官方文档里的一类（3 开头的引擎错误），按前缀匹配。
+
+    维护约束：**同一个 infocode 不能同时出现在两张表里**——否则分类结果取决于
+    查表顺序（本函数按 fatal → retry → skip 的顺序短路），改动表的时候很容易
+    察觉不到。新增码时请只放一张表。
     """
     code = str(infocode or "")
     if code in FATAL_CODES:

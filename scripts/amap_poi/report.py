@@ -28,7 +28,12 @@ def compute_exit_code(result: Any) -> int:
 
 
 def unit_note(unit: Any) -> str:
-    """给单个单元一句人话说明，供报告与终端共用。"""
+    """给单个单元一句人话说明，供报告与终端共用。
+
+    这些字符串会进 ``report.json``，也是 Agent 转述给用户的原料，因此：
+      * **不要出现裸的 ``%``**——本函数用 ``%`` 格式化，字面百分号必须写成 ``%%``；
+      * 不要用 ``%@`` 之类残缺占位符（历史上写过 ``"取满 %d 条%@"``，直接 ValueError）。
+    """
     if unit.status == "failed":
         return "失败：%s" % (unit.error or "未知错误")
     if unit.hit_cap:
@@ -51,7 +56,7 @@ def build_report(
     started_at: str = "",
     outputs: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
-    """组装 report.json，字段与 README §6.1 契约一致。"""
+    """组装 report.json，字段与 README 的「运行报告契约」一致。"""
     units = []
     for unit in result.units:
         entry = unit.as_dict()

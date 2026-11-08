@@ -8,6 +8,9 @@ config.json
 # 默认输出目录；显式除外 samples/ 里那份人工编造的演示数据
 output/
 
+# ---- 本地测试（保留在本机，不随仓库发布）----
+scripts/tests/
+
 # ---- Python ----
 __pycache__/
 *.py[cod]
