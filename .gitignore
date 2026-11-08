@@ -1,0 +1,33 @@
+# ---- 密钥与本地配置 ----
+config.json
+*.key
+.env
+.env.*
+
+# ---- 采集产物（含真实商户电话，绝不入库）----
+# 默认输出目录；显式除外 samples/ 里那份人工编造的演示数据
+output/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.venv/
+venv/
+env/
+build/
+dist/
+*.egg-info/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- 临时文件 ----
+.tmp/
+*.log
+*~
