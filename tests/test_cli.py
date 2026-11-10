@@ -31,7 +31,64 @@ class TestDryRun:
             raise AssertionError("dry-run 不应发起请求")
 
         monkeypatch.setattr("amap_poi.client.http_get_json", boom)
+        monkeypatch.setattr("amap_poi.regions.http_get_json", boom)
         assert cli.main(["-k", "汽修厂", "-r", "海口市", "--dry-run"]) == EXIT_OK
+
+    def test_district_path_also_offline(self, monkeypatch, capsys):
+        """区县名路径才是真正会联网的分支：dry-run 时必须同样零请求。
+
+        有 key、无缓存、还带了 --refresh-regions（强制联网），三重诱惑下也只能读本地。
+        """
+        def boom(*args, **kwargs):
+            raise AssertionError("dry-run 不应发起任何请求（含区县名解析）")
+
+        monkeypatch.setattr("amap_poi.client.http_get_json", boom)
+        monkeypatch.setattr("amap_poi.regions.http_get_json", boom)
+        monkeypatch.setenv("AMAP_KEY", "a" * 32)
+        code = cli.main(["-k", "汽修厂", "-r", "龙华区", "--dry-run", "--refresh-regions"])
+        assert code == EXIT_OK
+        out = capsys.readouterr().out
+        assert "龙华区" in out
+        assert "未发起任何请求" in out
+
+    def test_district_uses_cache_offline(self, monkeypatch, capsys, tmp_path):
+        """有缓存时 dry-run 不联网，且能把区县名解析成 adcode。"""
+        from amap_poi import regions
+
+        payload = {
+            "status": "1",
+            "districts": [
+                {
+                    "name": "海南省",
+                    "adcode": "460000",
+                    "level": "province",
+                    "districts": [
+                        {
+                            "name": "海口市",
+                            "adcode": "460100",
+                            "level": "city",
+                            "districts": [
+                                {"name": "龙华区", "adcode": "460106", "level": "district",
+                                 "districts": []}
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        index = regions.RegionIndex(regions.parse_tree(payload))
+        regions.save_index(index, str(tmp_path / "regions.json"))
+
+        def boom(*args, **kwargs):
+            raise AssertionError("有缓存时 dry-run 不应联网")
+
+        monkeypatch.setattr("amap_poi.client.http_get_json", boom)
+        monkeypatch.setattr("amap_poi.regions.http_get_json", boom)
+        monkeypatch.setenv("AMAP_KEY", "a" * 32)
+
+        assert cli.main(["-k", "汽修厂", "-r", "龙华区", "--dry-run"]) == EXIT_OK
+        out = capsys.readouterr().out
+        assert "460106" in out
 
     def test_district_without_cache_or_key_still_plans(self, capsys):
         """dry-run 时区县名解析不了也不该失败——计划本身就是给用户看的。"""

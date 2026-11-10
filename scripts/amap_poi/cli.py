@@ -179,7 +179,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=DEFAULT_CONFIG, help="config.json 路径")
     parser.add_argument("--out-dir", default=DEFAULT_OUTPUT_DIR, help="默认输出目录")
     parser.add_argument("--yes", action="store_true", help="跳过执行前确认（脚本/Agent 调用用）")
-    parser.add_argument("--dry-run", action="store_true", help="只打印计划，不发请求")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="只打印计划，不发请求（也就不验证 Key）")
     parser.add_argument("--version", action="version", version="%(prog)s " + __version__)
     return parser
 
@@ -203,17 +204,21 @@ def _region_cache(args) -> str:
     return default_cache_path(SKILL_ROOT)
 
 
-def _load_region_index(args, key, quiet=False):
+def _load_region_index(args, key, quiet=False, offline=False):
     """取行政区划索引：缓存新鲜时零请求、零 key。
+
+    ``offline=True``（dry-run 用）时**绝不联网**：忽略 ``--refresh-regions``，
+    只读本地缓存，没有缓存就返回 ``None`` 让调用方降级。
 
     返回 ``None`` 表示「离线可用但拿不到 key」，调用方决定是降级还是报错。
     """
     path = _region_cache(args)
+    refresh = getattr(args, "refresh_regions", False) and not offline
     try:
         return get_index(
             path,
             key=key or "",
-            refresh=getattr(args, "refresh_regions", False),
+            refresh=refresh,
         )
     except AmapError:
         if quiet:
@@ -373,13 +378,18 @@ def main(argv=None) -> int:
     # 关键：真跑时**必须**解析成功，否则就会把「龙华区」原样传给 API，
     # 拿到深圳的数据而毫无提示——这正是本工具最想避免的失败模式。
     if any(kind == "district" for kind, _ in parsed_regions):
-        try:
-            key = resolve_key(args.config, allow_prompt=False)
-        except AmapError:
+        if args.dry_run:
+            # dry-run 一律不联网：区县名解析**只用本地缓存**，没有缓存就按原名显示计划。
+            # 传空 key 让 get_index 走 cache-only 分支（缓存新鲜或过期都可用，但绝不发请求）。
             key = ""
+        else:
+            try:
+                key = resolve_key(args.config, allow_prompt=False)
+            except AmapError:
+                key = ""
         index = None
         try:
-            index = _load_region_index(args, key, quiet=True)
+            index = _load_region_index(args, key, quiet=True, offline=args.dry_run)
         except AmapError as exc:
             if not args.dry_run:
                 print("[x] 解析区县名需要行政区划索引：%s" % exc, file=sys.stderr)
@@ -393,7 +403,7 @@ def main(argv=None) -> int:
                       "但当前没有可用的 key。\n"
                       "    请设置 AMAP_KEY，或直接把区县换成 6 位 adcode。", file=sys.stderr)
                 return EXIT_FATAL
-            print("[!] 还没有行政区划缓存、也没有 key：dry-run 只能按区县名显示计划。"
+            print("[!] 本地没有行政区划缓存，dry-run 不联网，所以只能按区县名显示计划。"
                   "真跑之前会先花 1 次请求把区县名换成 6 位 adcode。")
         else:
             parsed_regions, notes, errors = resolve_all(index, parsed_regions)
@@ -423,7 +433,7 @@ def main(argv=None) -> int:
     print_plan(keywords, regions, parsed_regions, args.max_records, estimate, args.offset)
 
     if args.dry_run:
-        print("（dry-run：未发起任何请求）")
+        print("（dry-run：未发起任何请求，也未验证 Key）")
         return EXIT_OK
 
     try:
