@@ -42,7 +42,7 @@ export AMAP_KEY="你的32位key"
 
 ### 2. 本地 config.json（推荐给日常使用）
 
-复制 `config.example.json` 为 `config.json`，填入 key：
+直接编辑技能根目录的 `config.json`，把 key 填进 `key` 字段：
 
 ```json
 {
@@ -50,8 +50,7 @@ export AMAP_KEY="你的32位key"
 }
 ```
 
-`config.json` 已在 `.gitignore` 里，**不会**被提交。
-仓库里只有 `config.example.json`（占位符）。
+`config.json` 是入库模板（key 默认为占位串）。填入真实 key 后请勿提交；优先用 `AMAP_KEY` 环境变量。
 
 ### 3. 交互式粘贴
 

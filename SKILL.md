@@ -23,7 +23,7 @@ description: 用高德地图按关键词+地区批量采集 POI 商户名单（�
 规则：
 
 1. 先 `cd` 到技能目录，或用**绝对路径**调用脚本（`<BASE>/scripts/collect.py`）。
-2. Key 优先用环境变量 `AMAP_KEY`。也支持技能根目录下的 `config.json`
+2. Key 优先用环境变量 `AMAP_KEY`。也可直接在技能根目录的 `config.json` 里填 key
    （找不到时会回退到技能目录去找，不会因为 cwd 不同而丢 key）。
 3. 输出目录 `--out-dir` 是**相对当前工作目录**的；跨目录调用时显式给绝对路径，别让文件散落到未知位置。
 

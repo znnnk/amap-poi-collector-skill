@@ -1,5 +1,5 @@
 # ---- 密钥与本地配置 ----
-config.json
+# config.json 是入库模板，故不忽略；若在其中填入真实 key，请勿提交
 *.key
 .env
 .env.*

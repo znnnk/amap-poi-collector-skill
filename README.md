@@ -51,7 +51,7 @@ Key 是你的账号身份和配额主体，请只用自己的，不要共用或�
 ```bash
 git clone https://github.com/znnnk/amap-poi-collector-skill.git
 cd amap-poi-collector-skill
-export AMAP_KEY=你的32位key        # 或 cp config.example.json config.json 后填写
+export AMAP_KEY=你的32位key        # 或直接在技能目录的 config.json 里填 key
 
 # 把整个仓库挂进技能目录，目录名必须与 SKILL.md 里的 name 完全一致
 ln -s "$PWD" ~/.dsh/skills/amap-poi-collector-skill      # Linux / macOS
@@ -182,7 +182,7 @@ amap-poi-collector-skill/      # ← 技能目录，目录名必须与 SKILL.md 
 ├── SKILL.md                   # 门面：Agent 读它决定怎么问、怎么跑、怎么汇报
 ├── README.md                  # 本文件
 ├── SECURITY.md                # Key 泄漏处置、issue 里别贴什么
-├── LICENSE  .gitignore  config.example.json
+├── LICENSE  .gitignore  config.json
 ├── scripts/
 │   ├── collect.py             # 单行入口：python scripts/collect.py ...
 │   └── amap_poi/              # 引擎：cli / client / collect / export / normalize / regions / report

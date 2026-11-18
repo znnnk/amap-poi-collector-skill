@@ -5,7 +5,8 @@
 | 内容 | 后果 |
 |---|---|
 | 高德 API Key（32 位十六进制） | 他人可直接消耗你的配额，或导致你的 key 被平台处置 |
-| `config.json` / `.env` / `*.key` | 同上；这些文件已在 `.gitignore` 中，请勿强行 `git add -f` |
+| `.env` / `*.key` | 同上；已在 `.gitignore` 中，请勿强行 `git add -f` |
+| 填入真实 key 的 `config.json` | `config.json` 是入库模板（key 为占位串）；填入后请勿提交，优先用 `AMAP_KEY` 环境变量 |
 | 采集产出的 CSV / JSON / XLSX | 含真实商户名称与电话，属个人信息，不应进入公开仓库 |
 | 带 Key 的截图、日志、issue 正文 | 截图和日志同样会长期公开留存 |
 

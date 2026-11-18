@@ -142,6 +142,13 @@ class TestResolveKey:
         assert excinfo.value.action == "fatal"
         assert "AMAP_KEY" in str(excinfo.value)
 
+    def test_template_user_amap_key_is_not_a_key(self, tmp_path):
+        config = tmp_path / "config.json"
+        config.write_text('{"key": "user-amap-key"}', encoding="utf-8")
+        with pytest.raises(AmapError) as excinfo:
+            cli.resolve_key(str(config), allow_prompt=False)
+        assert excinfo.value.action == "fatal"
+
     def test_missing_key_message_names_web_service(self):
         with pytest.raises(AmapError) as excinfo:
             cli.resolve_key("nope.json", allow_prompt=False)

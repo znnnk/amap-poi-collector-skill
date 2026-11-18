@@ -21,7 +21,7 @@ from .normalize import parse_region
 from .regions import default_cache_path, get_index, resolve_all
 from .report import EXIT_FATAL, EXIT_OK, EXIT_PARTIAL, build_report, compute_exit_code, write_report
 
-KEY_PLACEHOLDER_HINTS = ("在此填入", "your_key", "YOUR_KEY", "<", "请填入")
+KEY_PLACEHOLDER_HINTS = ("在此填入", "your_key", "YOUR_KEY", "user-amap-key", "<", "请填入")
 
 #: 技能目录（``SKILL.md`` 所在目录）= ``scripts/amap_poi/`` 往上两级。
 #: 用于「从别的工作目录调用时，也能找到放在技能根目录的 config.json」。
